@@ -121,7 +121,7 @@ def train():
     tokenizer.pad_token = tokenizer.unk_token
     dataset = load_dataset("yizhongw/self_instruct")
     train_dataset = dataset["train"]
-    data_loader = prepare_dataloader(train_dataset,
+    data_loader = setup_distributed_dataloader(train_dataset,
         batch_size=training_args.per_device_train_batch_size,
         shuffle=True,
         drop_last=True,

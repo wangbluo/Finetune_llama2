@@ -243,53 +243,6 @@ def setup_distributed_dataloader(
         **_kwargs,
     )
 
-def prepare_dataloader(
-    dataset: DatasetType,
-    batch_size: int = 1,
-    shuffle: bool = False,
-    seed: int = 1024,
-    drop_last: bool = False,
-    pin_memory: bool = False,
-    num_workers: int = 0,
-    collate_fn: Callable[[Sequence[Dict[str, Union[str, List[int]]]]], Dict[str, torch.Tensor]] = None,
-    process_group: Optional[ProcessGroup] = None,
-    use_tp: Optional[bool] = False,
-    **kwargs,
-) -> DataLoader:
-    """
-    Setup dataloader for distributed training.
-    """
-    _kwargs = kwargs.copy()
-    process_group = process_group or _get_default_group()
-    sampler = StatefulDistributedSampler(
-        dataset=dataset,
-        num_replicas=process_group.size() if not use_tp else 1,
-        rank=process_group.rank(),
-        shuffle=shuffle,
-        seed=seed,
-        drop_last=drop_last,
-        use_tp=use_tp,
-    )
-
-    # Deterministic dataloader
-    def seed_worker(worker_id: int) -> None:
-        worker_seed = seed
-        np.random.seed(worker_seed)
-        torch.manual_seed(worker_seed)
-        random.seed(worker_seed)
-
-    return DataLoader(
-        dataset=dataset,
-        batch_size=batch_size,
-        sampler=sampler,
-        num_workers=num_workers,
-        collate_fn=collate_fn,
-        pin_memory=pin_memory,
-        drop_last=drop_last,
-        worker_init_fn=seed_worker,
-        **_kwargs,
-    )
-
 
 def load_json(file_path: str):
     with open(file_path, "r") as f:
