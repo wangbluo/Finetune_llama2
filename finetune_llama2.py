@@ -99,18 +99,17 @@ def to_device(batch, device):
 
 def train():
     parser = HfArgs((ModelArguments, DataArguments, TrainingArguments))
-    #import 
     setup()
     print(dist.is_initialized())
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # finetune loss function has already done in LlamaForCausalLM loss function.
+    """# finetune loss function has already done in LlamaForCausalLM loss function.
     model = LlamaForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
-    )
+    )"""
     
-    #model = LlamaForCausalLM.from_pretrained('openlm-research/open_llama_3b')
+    model = LlamaForCausalLM.from_pretrained('openlm-research/open_llama_3b')
     # lazy_init
     # torch DDP can't recognize the lazy_init, use it after DDP.
     if not training_args.use_ddp and training_args.lazy_init:
@@ -218,7 +217,7 @@ def train():
     output_tp_1 = model_tp(**batch)
     testcase.assertEqual(output_1, output_tp_1)
 
-    # traininig
+    """# traininig
     # tensorboard
     writer = SummaryWriter("/home/wangbinluo/Finetune_llama2/tensorboard")
     epoch = 0
@@ -273,7 +272,7 @@ def train():
             torch.cuda.empty_cache()
     
     model.eval()
-    writer.close()
+    writer.close()"""
 
 
 if __name__ == "__main__":
