@@ -2,14 +2,11 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 
 )
-
 from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, PrepareModuleInput
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, Placement
-from copy import deepcopy
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase
-import torch.distributed._functional_collectives as funcol
 
 NUM_DEVICES = 4
 if torch.cuda.is_available() and torch.cuda.device_count() > 1:
@@ -29,7 +26,7 @@ def _check_module(m1, m2, check_grad=False):
                 replicate = [Replicate()]
                 param_m2 = param_m2.redistribute(
                     device_mesh=param_m2.device_mesh, placements=replicate
-                ).to_local()
+                ).to_local() # DTensor to torch.Tensor
             testcase.assertEqual(param_m2, param_m1)
 
         x = 1
@@ -44,7 +41,6 @@ def get_tensor_sharded_model(model, use_ddp):
     # Parallelize the embedding submodules.
     
     parallelize_module(model.model.embed_tokens, device_mesh, ColwiseParallel(output_layouts=Replicate()))
-
     # Parallelize the attention and feed forward submodules.
     for layer in model.model.layers:
         

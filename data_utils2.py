@@ -253,7 +253,11 @@ def save_json(data, file_path: str):
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
-
+def all_reduce_mean(tensor: torch.Tensor) -> torch.Tensor:
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    tensor = tensor.data
+    tensor.div_(dist.get_world_size())
+    return tensor
 class RandomDataset(Dataset):
     def __init__(self, num_samples: int = 1000, max_length: int = 2048, vocab_size: int = 32000):
         self.num_samples = num_samples

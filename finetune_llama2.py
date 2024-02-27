@@ -4,31 +4,36 @@ from dataclasses import dataclass, field
 from datasets import load_dataset
 from typing import Optional, Dict, Sequence
 import lazy_init
-import data_utils 
 from transformers import TrainingArguments as TrainArgs, HfArgumentParser as HfArgs
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.tokenization_llama import LlamaTokenizer
-import transformers
 from torch.utils.data import DataLoader
 import torch.optim
 from torch.cuda.amp import autocast
 import torch.distributed as dist
 import time
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from tensor_parallel import get_tensor_sharded_model
 from transformers.models.llama.configuration_llama import LlamaConfig
 from copy import deepcopy
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import Dataset
 from functools import partial
-from data_utils2 import (prepare_dataloader, 
-                         DataCollatorForSupervisedDataset, 
-                         setup_distributed_dataloader)
+from data_utils2 import DataCollatorForSupervisedDataset, setup_distributed_dataloader, all_reduce_mean
 from tensor_parallel import _check_module
 from torch.testing._internal.common_utils import TestCase
+import os
 
-
+def setup():
+    os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
+    os.environ["MASTER_PORT"] = os.getenv("MASTER_PORT", "12355")
+    rank = int(os.environ['RANK'])
+    local_rank = int(os.environ['LOCAL_RANK'])
+    world_size = int(os.environ['WORLD_SIZE'])
+    dist.init_process_group(world_size=world_size, rank=rank,
+                            init_method="env://", backend="nccl")
+    torch.cuda.set_device(local_rank)
+    device_id = torch.cuda.current_device()
+    print("Process running on GPU:", device_id)
 
 @dataclass
 class ModelArguments:
@@ -94,15 +99,18 @@ def to_device(batch, device):
 
 def train():
     parser = HfArgs((ModelArguments, DataArguments, TrainingArguments))
+    #import 
+    setup()
+    print(dist.is_initialized())
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # setup() has already done in HfArgumentParser() function
     # finetune loss function has already done in LlamaForCausalLM loss function.
-    model = LlamaForCausalLM.from_pretrained(
+    """model = LlamaForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
-    )
-
+    )"""
+    
+    model = LlamaForCausalLM.from_pretrained('openlm-research/open_llama_3b')
     # lazy_init
     # torch DDP can't recognize the lazy_init, use it after DDP.
     if not training_args.use_ddp and training_args.lazy_init:
@@ -162,7 +170,7 @@ def train():
     elif training_args.lazy_init or training_args.gradient_checkpointing:
         print_rank0("The DTensor is incompatible with the lazy_init or gradient_checkpointing, please keep them False..") 
     else:
-        get_tensor_sharded_model(model,training_args.use_ddp) 
+        #get_tensor_sharded_model(model,training_args.use_ddp) 
 
         dataset = []
 
@@ -178,61 +186,38 @@ def train():
         collate_fn=data_collator,
         use_tp=True
     )
-        #get_tensor_sharded_model(model_tp,training_args.use_ddp) 
+        get_tensor_sharded_model(model_tp,training_args.use_ddp) 
 
     # tensorboard
     writer = SummaryWriter("/home/wangbinluo/Finetune_llama2/tensorboard")
     
     # unit test for TP
-
     testcase = TestCase()
-    
+
     data_iter = iter(data_loader)
     batch = to_device(next(data_iter), device)
-
     _check_module(model, model_tp)
 
-    #output = model(**batch)
-    #output_tp = model_tp(**batch)
-    attn_hs = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_atten.pt")
-    attn_hs_tp = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_atten_tp.pt")
-
-    hs_before_mlp = torch.load("/home/wangbinluo/Finetune_llama2/hs_before_mlp.pt")
-    hs_before_mlp_tp = torch.load("/home/wangbinluo/Finetune_llama2/hs_before_mlp_tp.pt")
-
-    hs_after_mlp = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_mlp.pt")
-    hs_after_mlp_tp = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_mlp_tp.pt")
-
-    hs_output = torch.load("/home/wangbinluo/Finetune_llama2/hs_output.pt")
-    hs_output_tp = torch.load("/home/wangbinluo/Finetune_llama2/hs_output_tp.pt")
-
-    hs_before_output_norm = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_output_norm.pt")
-    hs_before_output_norm_tp = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_output_norm_tp.pt")
-
-    hs_after_output_norm = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_output_norm.pt")
-    hs_after_output_norm_tp = torch.load("/home/wangbinluo/Finetune_llama2/hs_after_output_norm_tp.pt")
-
-    testcase.assertEqual(attn_hs, attn_hs_tp)
-    testcase.assertEqual(hs_before_mlp, hs_before_mlp_tp)
-    testcase.assertEqual(hs_after_mlp, hs_after_mlp_tp)
-    testcase.assertEqual(hs_output, hs_output_tp)
-    print(hs_before_output_norm)
-    print(hs_before_output_norm_tp)
-    testcase.assertEqual(hs_before_output_norm, hs_before_output_norm_tp)
-    testcase.assertEqual(hs_after_output_norm, hs_after_output_norm_tp)
-
-    #output[0].backward()
-    #output_tp[0].backward()
-
+    output = model(**batch)
+    output_tp = model_tp(**batch)
+    testcase.assertEqual(output[0], output_tp[0])
     _check_module(model, model_tp, check_grad=True)
+
+    output[0].backward()
+    output_tp[0].backward()
+    _check_module(model, model_tp, check_grad=True)
+
     optimizer = torch.optim.Adam(model.parameters(), 2e-5)
     optimizer_tp = torch.optim.Adam(model_tp.parameters(), 2e-5) 
     optimizer.step()
     optimizer_tp.step()
     _check_module(model, model_tp)
+
     batch = to_device(next(data_iter), device)
+
     output_1 = model(**batch)
     output_tp_1 = model_tp(**batch)
+    testcase.assertEqual(output_1, output_tp_1)
 
     # traininig
     epoch = 0
@@ -241,7 +226,7 @@ def train():
     num_steps_per_epoch = len(data_loader)
     train_epoches  = training_args.num_train_epochs
 
-    """for _epoch in range(epoch, training_args.num_train_epochs):
+    for _epoch in range(epoch, training_args.num_train_epochs):
         for batch in data_loader:
             step += 1
             torch.cuda.synchronize()
@@ -274,7 +259,7 @@ def train():
                                 training_args.model_max_length,
                                 step_time)
             
-            data_utils.all_reduce_mean(loss) 
+            all_reduce_mean(loss) 
             print_rank0(f"Epoch:{_epoch} " +
                         f"step_{step} / total_steps_{train_epoches * num_steps_per_epoch} " +
                         f"loss: {loss.item()} " +
@@ -284,7 +269,7 @@ def train():
                         f"max_allocated_mem: {(torch.cuda.max_memory_allocated() / 1024**2):.2f}MB " +
                         f"tflops: {tflops:.2f}")
             writer.add_scalar("loss", loss.item(),step)
-            torch.cuda.empty_cache()"""
+            torch.cuda.empty_cache()
     
     model.eval()
     writer.close()
