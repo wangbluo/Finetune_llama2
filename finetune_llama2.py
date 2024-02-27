@@ -105,12 +105,12 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     # finetune loss function has already done in LlamaForCausalLM loss function.
-    """model = LlamaForCausalLM.from_pretrained(
+    model = LlamaForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
-    )"""
+    )
     
-    model = LlamaForCausalLM.from_pretrained('openlm-research/open_llama_3b')
+    #model = LlamaForCausalLM.from_pretrained('openlm-research/open_llama_3b')
     # lazy_init
     # torch DDP can't recognize the lazy_init, use it after DDP.
     if not training_args.use_ddp and training_args.lazy_init:
@@ -136,7 +136,7 @@ def train():
         collate_fn=partial(tokenize_batch_for_finetune, tokenizer=tokenizer, max_length=training_args.model_max_length),
     )
 
-    # optimizer and scheduler
+    """# optimizer and scheduler
     # torch2.1 support optimizers as Adadelta Adagrad Adam AdamW SparseAdam Adamax ASGD SGD RAdam Rprop RMSprop NAdam and LBFGS.
     optimizer = torch.optim.Adam(model.parameters(), training_args.learning_rate, 
                                     [training_args.adam_beta1, training_args.adam_beta2],
@@ -151,34 +151,34 @@ def train():
     elif training_args.lr_scheduler == "linear": 
         scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 
                                                       start_factor=0.5,
-                                                      total_iters=training_args.num_train_epochs * len(data_loader))
-    # use ddp
+                                                      total_iters=training_args.num_train_epochs * len(data_loader))"""
+    """# use ddp
     rank = dist.get_rank()
     device_id = rank % torch.cuda.device_count()
 
     if training_args.use_ddp:
         model = model.to(device_id)
-        model = DDP(model, device_ids=[device_id], find_unused_parameters = True) 
+        model = DDP(model, device_ids=[device_id], find_unused_parameters = True) """
     
         
     # use tp
     # TODO: TP now is imcompatiable with gradient_checkpoint, lazy_linear. 
     # Dataloader's order should be consistent across different processes when using TP, set shuffle = false
     model_tp = deepcopy(model)
-    if training_args.tp < 4:
+    """if training_args.tp < 4:
         print_rank0("Minimum tp size is 4! Can't use tp strategy.")
     elif training_args.lazy_init or training_args.gradient_checkpointing:
         print_rank0("The DTensor is incompatible with the lazy_init or gradient_checkpointing, please keep them False..") 
     else:
-        #get_tensor_sharded_model(model,training_args.use_ddp) 
+        #get_tensor_sharded_model(model,training_args.use_ddp) """
 
-        dataset = []
+    dataset = []
 
-        for data in train_dataset: 
-            dataset.append(tokenize_batch_for_finetune_tp(data, tokenizer, training_args.model_max_length))
+    for data in train_dataset: 
+        dataset.append(tokenize_batch_for_finetune_tp(data, tokenizer, training_args.model_max_length))
          
-        data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer, max_length=training_args.model_max_length)
-        data_loader = setup_distributed_dataloader(
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer, max_length=training_args.model_max_length)
+    data_loader = setup_distributed_dataloader(
         dataset=dataset,
         batch_size=training_args.per_device_train_batch_size,
         shuffle=True,
@@ -186,10 +186,9 @@ def train():
         collate_fn=data_collator,
         use_tp=True
     )
-        get_tensor_sharded_model(model_tp,training_args.use_ddp) 
+    get_tensor_sharded_model(model_tp,training_args.use_ddp) 
 
-    # tensorboard
-    writer = SummaryWriter("/home/wangbinluo/Finetune_llama2/tensorboard")
+
     
     # unit test for TP
     testcase = TestCase()
@@ -220,6 +219,8 @@ def train():
     testcase.assertEqual(output_1, output_tp_1)
 
     # traininig
+    # tensorboard
+    writer = SummaryWriter("/home/wangbinluo/Finetune_llama2/tensorboard")
     epoch = 0
     step = 0
 
